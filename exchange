@@ -1,33 +1,122 @@
-**Overview of Implementation and Issues**
+package handlers
 
-### Implementation:
-1. **Wrapper Creation:**
-   - Developed a wrapper in GoLang that imports the `exchangeHttpClient` as a dependency.
-   - This enables the use of `exchangeHttpClient` functions to communicate with the Exchange API.
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"time"
 
-2. **Credentials Configuration:**
-   - Added Exchange-provided credentials to the environment variables.
-   - Used these credentials in the `main.go` file to construct the `exchangeClientConfig`.
+	"github.com/google/uuid"
+)
 
-3. **API Requests:**
-   - Constructed the Exchange client object using the environment variables.
-   - Used the `exchangeHttpClient`'s `Get` method to send requests to the Exchange.
+type UpsertJobStatusRequest struct {
+	WorkflowID          string `json:"workflowId"`
+	Status              string `json:"status"`
+	TenantConfigID      string `json:"tenantConfigId"`
+	TenantConfigVersion string `json:"tenantConfigVersion"`
+	EventDetails        string `json:"eventDetails"`
+}
 
-### Observations:
-There are two cases encountered while making API requests:
+type UpsertJobStatusResponse struct {
+	Message string `json:"message"`
+}
 
-#### Case 1:
-- **Base URL & Credentials:** Used non-production `base_url` and non-production credentials.
-- **Outcome:** The OAuth request is successfully executed by the `exchangeHttpClient`, and an OAuth token is generated. However, when attempting to make a request to the non-production gateway (`/private/1723/credit-card/health` on the QA gateway), the request is rejected with a **403 Forbidden** error.
+type Event struct {
+	ID   string    `json:"id"`
+	Time time.Time `json:"time"`
+	Data Data      `json:"data"`
+}
 
-#### Case 2:
-- **Base URL & Credentials:** Used production `base_url` with non-production credentials.
-- **Outcome:** The `exchangeHttpClient` returns an **invalid credentials** error. The OAuth token cannot be generated, resulting in the `/private/1723/credit-card/health` request being uncallable.
+type Data struct {
+	EventStatus          string `json:"eventStatus"`
+	OriginationComponent string `json:"originationComponent"`
+	TenantConfigID       string `json:"tenantConfigId"`
+	TenantConfigVersion  string `json:"tenantConfigVersion"`
+	EventDetails         string `json:"eventDetails"`
+}
 
-### Blocker:
-- The current setup includes only non-production access credentials for the Exchange, which are incompatible with production Exchange APIs.
-- The only API available in the Exchange is the `product-delivery-api`, which is configured to the production gateway and cannot be redirected to the non-production gateway due to certain constraints.
+type RequestPayload struct {
+	BusinessApplication         string   `json:"businessApplication"`
+	SchemaName                  string   `json:"schemaName"`
+	SessionID                   string   `json:"sessionId"`
+	SessionStartingSequenceNumber int    `json:"sessionStartingSequenceNumber"`
+	Messages                    []string `json:"messages"`
+}
 
-### Resolution Needed:
-- Access to a non-production Exchange API is required. This would allow the wrapper to successfully route requests through the `exchangeHttpClient` to the Exchange.
+func UpsertJobStatus(ctx context.Context, request UpsertJobStatusRequest) (UpsertJobStatusResponse, error) {
+	// Create the event payload
+	id := uuid.New().String()
+	currentTime := time.Now()
 
+	eventStatus := "INGESTION_WORKFLOW_COMPLETE"
+	originationComponent := "IngestionWorkflowOrchestrator"
+
+	event := Event{
+		ID:   id,
+		Time: currentTime,
+		Data: Data{
+			EventStatus:          eventStatus,
+			OriginationComponent: originationComponent,
+			TenantConfigID:       request.TenantConfigID,
+			TenantConfigVersion:  request.TenantConfigVersion,
+			EventDetails:         request.EventDetails,
+		},
+	}
+
+	// Serialize the event to JSON
+	eventJSON, err := json.Marshal(event)
+	if err != nil {
+		return UpsertJobStatusResponse{}, fmt.Errorf("failed to serialize event: %w", err)
+	}
+
+	// Create the payload
+	payload := RequestPayload{
+		BusinessApplication:         "baproductcatalog",
+		SchemaName:                  "schema",
+		SessionID:                   "s0",
+		SessionStartingSequenceNumber: 1,
+		Messages:                    []string{string(eventJSON)},
+	}
+
+	// Serialize the payload to JSON
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return UpsertJobStatusResponse{}, fmt.Errorf("failed to serialize request payload: %w", err)
+	}
+
+	// Prepare the HTTP POST request
+	url := "http://sdp-pipeline:4202/internal-operations/developer-platform/stream-management/submit-data"
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		return UpsertJobStatusResponse{}, fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	// Set headers
+	req.Header.Set("accept", "application/json")
+	req.Header.Set("oauth_clientId", "test1234")
+	req.Header.Set("Content-Type", "application/json")
+
+	// Send the request
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return UpsertJobStatusResponse{}, fmt.Errorf("failed to send HTTP request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check the response
+	if resp.StatusCode != http.StatusOK {
+		return UpsertJobStatusResponse{}, fmt.Errorf("received non-OK HTTP status: %s", resp.Status)
+	}
+
+	// Decode the response
+	var response UpsertJobStatusResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return UpsertJobStatusResponse{}, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return response, nil
+}
