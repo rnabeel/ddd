@@ -1,122 +1,82 @@
-package handlers
+package main
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
-	"time"
 
-	"github.com/google/uuid"
+	"github.com/aws/aws-lambda-go/lambda"
 )
 
-type UpsertJobStatusRequest struct {
-	WorkflowID          string `json:"workflowId"`
-	Status              string `json:"status"`
-	TenantConfigID      string `json:"tenantConfigId"`
-	TenantConfigVersion string `json:"tenantConfigVersion"`
-	EventDetails        string `json:"eventDetails"`
-}
-
-type UpsertJobStatusResponse struct {
-	Message string `json:"message"`
-}
-
-type Event struct {
-	ID   string    `json:"id"`
-	Time time.Time `json:"time"`
-	Data Data      `json:"data"`
-}
-
-type Data struct {
-	EventStatus          string `json:"eventStatus"`
-	OriginationComponent string `json:"originationComponent"`
-	TenantConfigID       string `json:"tenantConfigId"`
-	TenantConfigVersion  string `json:"tenantConfigVersion"`
-	EventDetails         string `json:"eventDetails"`
-}
-
 type RequestPayload struct {
-	BusinessApplication         string   `json:"businessApplication"`
-	SchemaName                  string   `json:"schemaName"`
-	SessionID                   string   `json:"sessionId"`
-	SessionStartingSequenceNumber int    `json:"sessionStartingSequenceNumber"`
-	Messages                    []string `json:"messages"`
+	BusinessApplication    string        `json:"businessApplication"`
+	SchemaName             string        `json:"schemaName"`
+	SessionID              string        `json:"sessionId"`
+	SessionStartingSequenceNumber int     `json:"sessionStartingSequenceNumber"`
+	Messages               []MessageData `json:"messages"`
 }
 
-func UpsertJobStatus(ctx context.Context, request UpsertJobStatusRequest) (UpsertJobStatusResponse, error) {
-	// Create the event payload
-	id := uuid.New().String()
-	currentTime := time.Now()
+type MessageData struct {
+	ID    string `json:"id"`
+	Time  string `json:"time"`
+	Data  string `json:"data"`
+}
 
-	eventStatus := "INGESTION_WORKFLOW_COMPLETE"
-	originationComponent := "IngestionWorkflowOrchestrator"
-
-	event := Event{
-		ID:   id,
-		Time: currentTime,
-		Data: Data{
-			EventStatus:          eventStatus,
-			OriginationComponent: originationComponent,
-			TenantConfigID:       request.TenantConfigID,
-			TenantConfigVersion:  request.TenantConfigVersion,
-			EventDetails:         request.EventDetails,
+func handler(ctx context.Context) {
+	// Construct the payload
+	payload := RequestPayload{
+		BusinessApplication: "baproducatalog",
+		SchemaName:          "schema",
+		SessionID:           "s0",
+		SessionStartingSequenceNumber: 1,
+		Messages: []MessageData{
+			{
+				ID:   "3cec9767-9616-4f86-a460-b01376855365",
+				Time: "2024-11-27T15:38:55.362709191Z",
+				Data: "{\"eventStatus\":\"INGESTION_WORKFLOW_COMPLETE\",\"originationComponent\":\"IngestionWorkflowOrchestrator\",\"tenantConfigId\":\"customer-tenant-id\",\"tenantConfigVersion\":\"2\",\"eventDetails\":{\"jobName\":\"job-name\",\"jobRunId\":\"run-id\"}}",
+			},
 		},
 	}
 
-	// Serialize the event to JSON
-	eventJSON, err := json.Marshal(event)
-	if err != nil {
-		return UpsertJobStatusResponse{}, fmt.Errorf("failed to serialize event: %w", err)
-	}
-
-	// Create the payload
-	payload := RequestPayload{
-		BusinessApplication:         "baproductcatalog",
-		SchemaName:                  "schema",
-		SessionID:                   "s0",
-		SessionStartingSequenceNumber: 1,
-		Messages:                    []string{string(eventJSON)},
-	}
-
-	// Serialize the payload to JSON
+	// Convert payload to JSON
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		return UpsertJobStatusResponse{}, fmt.Errorf("failed to serialize request payload: %w", err)
+		log.Fatalf("Error marshalling payload: %v", err)
 	}
 
-	// Prepare the HTTP POST request
+	// Create the HTTP request
 	url := "http://sdp-pipeline:4202/internal-operations/developer-platform/stream-management/submit-data"
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payloadBytes))
 	if err != nil {
-		return UpsertJobStatusResponse{}, fmt.Errorf("failed to create HTTP request: %w", err)
+		log.Fatalf("Error creating request: %v", err)
 	}
 
 	// Set headers
-	req.Header.Set("accept", "application/json")
-	req.Header.Set("oauth_clientId", "test1234")
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("accept", "application/json")
+	req.Header.Set("oauth_clientid", "test1234")
 
-	// Send the request
+	// Make the HTTP request
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return UpsertJobStatusResponse{}, fmt.Errorf("failed to send HTTP request: %w", err)
+		log.Fatalf("Error making HTTP request: %v", err)
 	}
 	defer resp.Body.Close()
 
-	// Check the response
-	if resp.StatusCode != http.StatusOK {
-		return UpsertJobStatusResponse{}, fmt.Errorf("received non-OK HTTP status: %s", resp.Status)
+	// Read response
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatalf("Error reading response body: %v", err)
 	}
 
-	// Decode the response
-	var response UpsertJobStatusResponse
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return UpsertJobStatusResponse{}, fmt.Errorf("failed to decode response: %w", err)
-	}
+	fmt.Printf("Response: %s\n", body)
+}
 
-	return response, nil
+func main() {
+	lambda.Start(handler)
 }
