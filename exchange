@@ -1,82 +1,27 @@
-package main
-
-import (
-	"bytes"
-	"context"
-	"encoding/json"
-	"fmt"
-	"io/ioutil"
-	"log"
-	"net/http"
-
-	"github.com/aws/aws-lambda-go/lambda"
-)
-
-type RequestPayload struct {
-	BusinessApplication    string        `json:"businessApplication"`
-	SchemaName             string        `json:"schemaName"`
-	SessionID              string        `json:"sessionId"`
-	SessionStartingSequenceNumber int     `json:"sessionStartingSequenceNumber"`
-	Messages               []MessageData `json:"messages"`
+payload := map[string]interface{}{
+    "businessApplication": "baproductcatalog",
+    "schemaName":          "schema",
+    "sessionId":           "s0",
+    "sessionStartingSequenceNumber": 1,
+    "messages": []map[string]interface{}{
+        {
+            "id":   "3cec9767-9616-4f86-a460-b01376855365",
+            "time": "2024-11-27T15:38:55.362709191Z",
+            "data": map[string]interface{}{
+                "eventStatus":        "INGESTION_WORKFLOW_COMPLETE",
+                "originationComponent": "IngestionWorkflowOrchestrator",
+                "tenantConfigId":     "custom-tenant-id",
+                "tenantConfigVersion": "2",
+                "eventDetails": map[string]interface{}{
+                    "jobName": "job-name",
+                    "jobRunId": "run-id",
+                },
+            },
+        },
+    },
 }
 
-type MessageData struct {
-	ID    string `json:"id"`
-	Time  string `json:"time"`
-	Data  string `json:"data"`
-}
-
-func handler(ctx context.Context) {
-	// Construct the payload
-	payload := RequestPayload{
-		BusinessApplication: "baproducatalog",
-		SchemaName:          "schema",
-		SessionID:           "s0",
-		SessionStartingSequenceNumber: 1,
-		Messages: []MessageData{
-			{
-				ID:   "3cec9767-9616-4f86-a460-b01376855365",
-				Time: "2024-11-27T15:38:55.362709191Z",
-				Data: "{\"eventStatus\":\"INGESTION_WORKFLOW_COMPLETE\",\"originationComponent\":\"IngestionWorkflowOrchestrator\",\"tenantConfigId\":\"customer-tenant-id\",\"tenantConfigVersion\":\"2\",\"eventDetails\":{\"jobName\":\"job-name\",\"jobRunId\":\"run-id\"}}",
-			},
-		},
-	}
-
-	// Convert payload to JSON
-	payloadBytes, err := json.Marshal(payload)
-	if err != nil {
-		log.Fatalf("Error marshalling payload: %v", err)
-	}
-
-	// Create the HTTP request
-	url := "http://sdp-pipeline:4202/internal-operations/developer-platform/stream-management/submit-data"
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payloadBytes))
-	if err != nil {
-		log.Fatalf("Error creating request: %v", err)
-	}
-
-	// Set headers
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("accept", "application/json")
-	req.Header.Set("oauth_clientid", "test1234")
-
-	// Make the HTTP request
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Fatalf("Error making HTTP request: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// Read response
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		log.Fatalf("Error reading response body: %v", err)
-	}
-
-	fmt.Printf("Response: %s\n", body)
-}
-
-func main() {
-	lambda.Start(handler)
+bodyBytes, err := json.Marshal(payload)
+if err != nil {
+    log.Fatalf("Error marshaling payload: %v", err)
 }
