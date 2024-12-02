@@ -1,21 +1,31 @@
-for attempt := 1; attempt <= maxRetries; attempt++ {
-		resp, err := client.Do(req)
-		if err != nil {
-			// Log and retry on connection error
-			response = upsertJobStatusResponse{
-				Message: fmt.Sprintf("Failed to send the request on attempt %d: %v", attempt, err),
-			}
-			time.Sleep(2 * time.Second) // Add a delay between retries
-			continue
-		}
+for attempt := 1; attempt <= 5; attempt++ {
+    resp, err := client.Do(req)
 
-		defer resp.Body.Close()
+    if err != nil {
+        // Log error and retry
+        response = upsertJobStatusResponse{
+            Message: fmt.Sprintf("Attempt %d: Failed to send the request: %v", attempt, err),
+        }
+    } else {
+        if resp.StatusCode == http.StatusOK {
+            // Success: exit the loop
+            defer resp.Body.Close()
+            response = upsertJobStatusResponse{
+                Message: "Request succeeded",
+            }
+            return response, nil
+        }
 
-		// Check if the status code is not 200
-		if resp.StatusCode != http.StatusOK {
-			response = upsertJobStatusResponse{
-				Message: fmt.Sprintf("Attempt %d: Received non-200 status code: %d", attempt, resp.StatusCode),
-			}
-			time.Sleep(2 * time.Second) // Add a delay between retries
-			continue
-		}
+        // Log non-200 status code and retry
+        response = upsertJobStatusResponse{
+            Message: fmt.Sprintf("Attempt %d: Received non-200 status code: %d", attempt, resp.StatusCode),
+        }
+        defer resp.Body.Close() // Close response body
+    }
+
+    // Add delay between retries
+    time.Sleep(2 * time.Second)
+}
+
+// If all retries fail
+return response, fmt.Errorf("all attempts failed")
